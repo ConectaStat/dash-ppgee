@@ -1,0 +1,420 @@
+---
+title: "Pós-graduação em Estatísica e Experimentação Agropecuária - PPGEE"
+logo: fig/ufla.png
+format: dashboard
+
+theme: 
+  - cosmo
+  - estilos/custom.scss
+  - estilos/quarto.scss
+
+resources:
+  - fig/ufla.png
+
+execute: 
+  echo: false
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(googlesheets4)
+library(janitor)
+library(stringi)
+library(treemapify)
+library(ggthemes)
+```
+
+```{r data, include = FALSE}
+# Colunas removidas: E-mail, nome, e-mail, orientador, instituição atual e comentários
+# Arrumei manualmente na planilha os dados de "Local de residencia atual" para que fiquem no formato Municipio-UF
+
+gs4_deauth()
+dados <- read_sheet("https://docs.google.com/spreadsheets/d/1Z31Mvvl-qqRWmoIxrWW0i_a3fExBqL3PVSmZM32fPMQ/edit?usp=sharing")
+
+dados <- dados |>
+  select(-`Carimbo de data/hora`) |>
+  clean_names() |>
+  rename(
+    residencia = local_de_residencia_atual_ex_lavras_mg,
+    nivel = qual_nivel_do_programa_foi_cursado,
+    conclusao = em_qual_ano_voce_concluiu_seu_ultimo_nivel_no_ppgee,
+    linha = qual_a_linha_de_pesquisa_que_voce_atuou,
+    quali.disciplinas = como_voce_avalia_a_qualidade_do_programa_em_relacao_as_disciplinas_ofertadas,
+    recomenda = sobre_a_afirmacao_eu_recomendaria_o_ppgee_ufla_para_outras_pessoas,
+    contato.prof = voce_mantem_contato_com_seus_ex_professores_do_programa,
+    contato.colegas = voce_mantem_contato_com_ex_colegas_do_programa,
+    sexo = qual_seu_sexo,
+    avalia.orientador = como_voce_avalia_o_programa_em_relacao_ao_seu_contato_com_seu_orientador,
+    avalia.resultado = como_voce_avalia_o_programa_em_relacao_a_sua_satisfacao_com_o_resultado_da_sua_tese_dissertacao_desenvolvida,
+    formacao.ligada = sobre_a_afirmacao_a_formacao_obtida_no_ppgee_esta_diretamente_ligada_ao_meu_trabalho_profissional_hoje,
+    atuacao.hoje = qual_e_sua_situacao_profissional_atual_predominante_marque_apenas_uma_opcao
+  ) |>
+  separate(residencia, into = c("municipio", "uf"), sep="[-/,_]") 
+
+dados$uf <- str_squish(dados$uf)
+
+dados$nivel <- as.factor(dados$nivel)
+dados$linha <- as.factor(dados$linha)
+dados$contato.prof <- as.factor(dados$contato.prof)
+dados$contato.colegas <- as.factor(dados$contato.colegas)
+dados$sexo <- as.factor(dados$sexo)
+dados$atuacao.hoje <- as.factor(dados$atuacao.hoje)
+
+dados$quali.disciplinas <- as.factor(dados$quali.disciplinas)
+dados$recomenda <- as.factor(dados$recomenda)
+dados$avalia.orientador <- as.factor(dados$avalia.orientador)
+dados$avalia.resultado <- 
+as.factor(dados$avalia.resultado)
+
+dados$formacao.ligada <- as.factor(dados$formacao.ligada)
+# Municipios e UFs
+
+# Removendo acentos
+dados$municipio <- stri_trans_general(dados$municipio,"Latin-ASCII")
+
+#municipios em minusculo
+dados$municipio <- str_to_lower(dados$municipio)
+
+
+dados$municipio <- as.factor(dados$municipio)
+dados$uf <- as.factor(dados$uf)
+```
+
+
+```{r calculos}
+total_respostas <- nrow(dados)
+
+# 1. Percentual de egressos do sexo feminino
+pct_feminino <- dados |>
+  filter(sexo == "Feminino") |>
+  summarise(pc_fem = n() / total_respostas * 100) |>
+  pull(pc_fem)
+
+# 2. Percentual de respostas "sim" para contato.prof
+pct_contato_prof <- dados |>
+  filter(contato.prof == "Sim") |>
+  summarise(pc_prof = n() / total_respostas * 100) |>
+  pull(pc_prof)
+
+# 3. Percentual de respostas "sim" para formacao.ligada
+pct_formacao_ligada <- dados |>
+  filter(formacao.ligada == "5" | formacao.ligada == "4") |>
+  summarise(pc_form = n() / total_respostas * 100) |>
+  pull(pc_form)
+
+# Informações gerais da amostra
+total_municipios <- dados |> distinct(municipio) |> nrow()
+total_ufs <- dados |> distinct(uf) |> nrow()
+
+ms <- dados |>
+  filter(nivel == "Mestrado")
+
+do <- dados |>
+  filter(nivel == "Doutorado")
+ms_do <- dados |>
+  filter(nivel == "Mestrado e Doutorado")
+```
+
+
+# Perfil dos egressos
+
+## Row {height=30%}
+
+### Column
+
+::: {.valuebox icon = "gender-female"}
+
+**são do gênero feminino** 
+
+`r sprintf("%.1f%%", pct_feminino)`
+
+
+:::
+
+### Column
+
+::: {.valuebox icon="person-rolodex"}
+**ainda mantêm contato com os professores do PPGEE** 
+
+`r sprintf("%.1f%%", pct_contato_prof)`
+
+:::
+
+### Column
+
+::: {.card color="info"}
+
+**Informações da amostra:**
+
+- Total de respostas: `r total_respostas`
+- Número de municípios distintos: `r total_municipios`
+- Número de UFs distintas: `r total_ufs-1`
+:::
+
+## Row {height=70%}
+
+```{r}
+# Para os treemaps
+
+#Diminuir os niveis da variavel atuacao.hoje
+
+dados <- dados |>
+  mutate(atuacao.hoje = fct_recode(atuacao.hoje,
+                                   "Doutorando" = "Aluno de doutorado",
+                                   "Doutorando" = "Aluno de pós-graduação",
+                                   "Doutorando" = "Doutorado em estatística e experimentação agropecuária",
+                                   "Doutorando" = "DOUTORANDO",
+                                   "Doutorando" = "Estudante de doutorado",
+                                   "Doutorando" = "Estudante no doutorado.",
+                                   "Pesquisador" = "Bolsista DCID-2 do Consórcio Pesquisa Café na EPAMIG",
+                                   "Outro" = "Cargo comissionado",
+                                   "Outro" = "Consultor",
+                                   "Outro" = "Servidor Público",
+                                   "Outro" = "Professor Substituto"))
+
+dados_linha <- dados %>%
+  count(linha)
+
+dados_atuacao <- dados %>%
+  count(atuacao.hoje)
+```
+
+### Column
+
+```{r}
+#| title: Linha de pesquisa em que atuou
+
+ggplot(dados_linha, aes(area = n, fill = linha, label = paste0(linha, "\n", round(n / sum(n) * 100, 1), "%")))  +
+  geom_treemap() +
+  geom_treemap_text(fontface = "bold", colour = "white", place = "centre", grow = TRUE) +
+   scale_fill_colorblind() +
+    theme_minimal() +
+  theme(legend.position = "none") 
+```
+
+### Column
+
+```{r}
+#| title: Atuação profissional atual
+
+ggplot(dados_atuacao, aes(area = n, fill = atuacao.hoje, label = paste0(atuacao.hoje, "\n", round(n / sum(n) * 100, 1), "%"))) +
+  geom_treemap() +
+   scale_fill_colorblind() +
+  geom_treemap_text(fontface = "bold", colour = "white", place = "centre", grow = FALSE) +
+  theme_minimal()
+
+```
+
+
+
+
+# Avaliação do programa
+
+## Row
+
+### Column
+
+::: {.card color="info"}
+
+**Avaliação do programa**
+
+As perguntas com afirmações em relação ao programa foram avaliadas em uma escala de 1 a 5, em que 1 refere-se a "Discordo Totalmente" e 5 refere-se à "Concordo Totalmente".
+
+Para as perguntas de avaliação da qualidade do programa, foi considerada a escala de 1 a 5, em que 1 refere-se a "Péssimo" e 5 refere-se à "Excelente".
+
+:::
+
+### Column
+
+```{r}
+#| title: A formação obtida no PPGEE está diretamente ligada ao meu trabalho profissional hoje
+
+# Calcular proporções
+prop.formacao <- dados |>
+  group_by(nivel, formacao.ligada) |>
+  summarise(contagem.for = n(), .groups = 'drop') |>
+  group_by(nivel) |>
+  mutate(proporcao.for = contagem.for / sum(contagem.for))
+
+
+formacao <- prop.formacao |>
+  ggplot(aes(x = formacao.ligada, y = proporcao.for, fill=nivel)) +
+  geom_bar(stat = "identity" ,position = "dodge") +
+   scale_fill_colorblind() +
+   scale_x_discrete(limits = as.character(1:5)) +
+  labs(
+    x = "Nota (1 = Discordo totalmente e 5 = Concordo totalmente)",
+    y = "Proporção de respostas",
+    fill = " "
+    ) +
+   theme_minimal() +
+   theme(legend.position = "bottom")
+formacao
+```
+
+### Column
+
+```{r}
+#| title: Eu recomendaria o PPGEE/UFLA para outras pessoas
+
+# Calcular proporções
+prop.recomenda <- dados |>
+  group_by(nivel, recomenda) |>
+  summarise(contagem.rec = n(), .groups = 'drop') |>
+  group_by(nivel) |>
+  mutate(proporcao.rec = contagem.rec / sum(contagem.rec))
+
+recomenda <- prop.recomenda |>
+  ggplot(aes(x = recomenda, y = proporcao.rec, fill = nivel)) +
+  geom_bar(stat = "identity", position = "dodge") +
+   scale_fill_colorblind() +
+   scale_x_discrete(limits = as.character(1:5)) +
+  labs(
+    x = "Nota (1 = Discordo totalmente e 5 = Concordo totalmente)",
+    y = "Proporção de respostas",
+    fill = " "
+  ) +
+   theme_minimal() +
+  theme(legend.position = "bottom")
+recomenda
+```
+
+## Row
+
+### Column
+
+```{r}
+#| title: Qualidade do programa em relação às disciplinas ofertadas
+
+# Calcular proporções
+prop.disci <- dados |>
+  group_by(nivel, quali.disciplinas) |>
+  summarise(contagem.dis = n(), .groups = 'drop') |>
+  group_by(nivel) |>
+  mutate(proporcao.dis = contagem.dis / sum(contagem.dis))
+
+
+disciplinas <- prop.disci |>
+  ggplot(aes(x = quali.disciplinas, y = proporcao.dis, fill=nivel)) +
+  geom_bar(stat = "identity", position = "dodge") +
+   scale_fill_colorblind() +
+   scale_x_discrete(limits = as.character(1:5)) +
+  labs(
+    x = "Nota (1 = Péssimo e 5 = Excelente)",
+    y = "Proporção de respostas",
+    fill = " "
+  ) +
+   theme_minimal() +
+   theme(legend.position = "bottom")
+disciplinas
+```
+
+### Column
+
+```{r}
+#| title: Avaliação em relação ao contato com seu orientador
+
+# Calcular proporções
+prop.ori <- dados |>
+  group_by(nivel, avalia.orientador) |>
+  summarise(contagem.ori = n(), .groups = 'drop') |>
+  group_by(nivel) |>
+  mutate(proporcao.ori = contagem.ori / sum(contagem.ori))
+
+
+orientador <- prop.ori |>
+  ggplot(aes(x = avalia.orientador, y = proporcao.ori, fill = nivel)) +
+  geom_bar(, stat = "identity", position = "dodge") +
+   scale_fill_colorblind() +
+   scale_x_discrete(limits = as.character(1:5)) +
+  labs(
+    x = "Nota (1 = Péssimo e 5 = Excelente)",
+    y = "Proporção de respostas",
+    fill = " "
+  ) +
+   theme_minimal() +
+   theme(legend.position = "bottom")
+orientador
+```
+
+### Column
+
+```{r}
+#| title: Avaliação em relação em relação satisfação com o resultado da tese/dissertação desenvolvida
+
+# Calcular proporções
+prop.resul <- dados |>
+  group_by(nivel, avalia.resultado) |>
+  summarise(contagem.resul = n(), .groups = 'drop') |>
+  group_by(nivel) |>
+  mutate(proporcao.resul = contagem.resul / sum(contagem.resul))
+
+
+resultado <- prop.resul |>
+  ggplot(aes(x = avalia.resultado, y = proporcao.resul, fill = nivel)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_colorblind() +
+   scale_x_discrete(limits = as.character(1:5)) +
+  labs(
+    x = "Nota (1 = Péssimo e 5 = Excelente)",
+    y = "Proporção de respostas",
+    fill = " "
+  ) +
+   theme_minimal()+
+    theme(legend.position = "bottom")
+  
+resultado
+
+
+```
+
+
+# Sobre
+
+## Row {.flow}
+
+::: card
+::: card-header
+Sobre o PPGEE - UFLA
+:::
+
+::: card-body
+O Programa de [Pós-Graduação em Estatística e Experimentação Agropecuária da UFLA](https://sigaa.ufla.br/sigaa/public/programa/portal.jsf?lc=pt_BR&id=1702) concentra suas atividades no estudo e desenvolvimento de métodos estatísticos modernos para a análise de dados nas diversas áreas do conhecimento, mas com especial atenção à Estatística e Experimentação Agropecuária. O objetivo principal do programa é formar recursos humanos e garantir sua qualificação, aprimorando seus conhecimentos em Estatística e Experimentação para o exercício de atividades de docência e de pesquisa em instituições de ensino, pesquisa e em empresas, públicas ou privadas. As linhas de pesquisa são: Estatística Experimental e Aplicada, Teoria Matemática e Métodos Estatísticos, Análise Multivariada e Estatística Espacial, sendo que estas envolvem:
+
+- Estatística Experimental: planejamento de experimentos, análise de dados oriundos de estudos agropecuários e interpretação dos resultados obtidos;
+
+- Análise de regressão e séries temporais: estimação e predição de modelos lineares e não lineares e análise de dados cronológicos;
+
+- Teoria e métodos estatísticos: estudos de dinâmica de populações, inferência bayesiana e modelagem estatística e métodos de comparações múltiplas;
+
+- Estatística genética e genômica: ênfase na avaliação genética, em métodos de predição de valores genéticos e em inferências sobre parâmetros genéticos;
+
+- Métodos multivariados: proposição e avaliação de testes e análise de estabilidade de cultivares;
+
+- Métodos computacionais: uso de métodos computacionais intensivos e técnicas de data science na aplicação e desenvolvimento de métodos estatísticos;
+
+- Estatística espacial: análise de dados correlacionados espacialmente e espaço-temporalmente, em estudos de geoestatística, processos pontuais e análise de dados de áreas.
+
+ O programa é financiado com recursos do Programa de Apoio à Pós-Graduação (PROAP) da Coordenação de Aperfeiçoamento de Pessoal de Nível Superior (CAPES), além do financiamento da maioria dos discentes, por meio de bolsas de estudos concedidas pela CAPES, Conselho Nacional de Desenvolvimento Científico e Tecnológico (CNPq) e Fundação de Amparo à Pesquisa do Estado de Minas Gerais (FAPEMIG).
+
+:::
+:::
+
+::: card
+::: card-header
+Sobre esse dashboard
+:::
+::: card-body
+Este dashboard foi obtido com dados de uma pesquisa realizada pela coordenação do PPGEE e iniciada em 2024. A todos os egressos do programa foi enviado um questionário online e identificado, com perguntas gerais sobre sua experiência com o curso. Até a presente versão, foram recebidas `r total_respostas` respostas.  
+
+> **Última atualização** - 02 de fevereiro de 2025
+
+Contato:
+
+📧 <a href="mailto:posgrad_si.icet@ufla.br">posgrad_si.icet@ufla.br</a>
+
+📞  <a href="Telefone:+553538295195">+55 35 3829-5195</a>
+
+
+:::
+:::
